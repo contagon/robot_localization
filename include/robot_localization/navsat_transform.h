@@ -241,10 +241,6 @@ class NavSatTransform
     //!
     tf2_ros::StaticTransformBroadcaster utm_broadcaster_;
 
-    //! @brief Stores the yaw we need to compute the transform
-    //!
-    double utm_odom_tf_yaw_;
-
     //! @brief Holds the UTM->odom transform
     //!
     tf2::Transform utm_world_transform_;
