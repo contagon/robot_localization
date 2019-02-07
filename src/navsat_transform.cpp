@@ -45,7 +45,6 @@ namespace RobotLocalization
 {
   NavSatTransform::NavSatTransform() :
     magnetic_declination_(0.0),
-    utm_odom_tf_yaw_(0.0),
     yaw_offset_(0.0),
     transform_timeout_(ros::Duration(0)),
     broadcast_utm_transform_(false),

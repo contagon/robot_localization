@@ -1894,6 +1894,14 @@ namespace RobotLocalization
       }
       else
       {
+        // Save current state so we can revert back to it if the output state is invalid
+        FilterState previousState;
+        previousState.state_ = Eigen::VectorXd(filter_.getState());
+        previousState.estimateErrorCovariance_ = Eigen::MatrixXd(filter_.getEstimateErrorCovariance());
+        previousState.lastMeasurementTime_ = filter_.getLastMeasurementTime();
+        previousState.latestControl_ = Eigen::VectorXd(filter_.getControl());
+        previousState.latestControlTime_ = filter_.getControlTime();
+
         // Now we'll integrate any measurements we've received
         integrateMeasurements(curTime);
 
@@ -1902,6 +1910,20 @@ namespace RobotLocalization
 
         if (getFilteredOdometryMessage(filteredPosition))
         {
+          if (!validateFilterOutput(filteredPosition))
+          {
+            ROS_ERROR_STREAM("NaNs were detected in the output state of the filter." <<
+                  " This was likely due to poorly coniditioned process, noise, or sensor covariances." <<
+                  " Reverting to previous state.");
+
+            filter_.setState(previousState.state_);
+            filter_.setEstimateErrorCovariance(previousState.estimateErrorCovariance_);
+            // FIXME we assume getFilteredOdometryMessage would be good; the validation check should actuall
+            // the filter, on the state, not on the output message, so we can even detect that per measureme
+            // or state prediction
+            getFilteredOdometryMessage(filteredPosition);
+          }
+
           worldBaseLinkTransMsg_.header.stamp = filteredPosition.header.stamp + tfTimeOffset_;
           worldBaseLinkTransMsg_.header.frame_id = filteredPosition.header.frame_id;
           worldBaseLinkTransMsg_.child_frame_id = filteredPosition.child_frame_id;
@@ -3229,6 +3251,24 @@ namespace RobotLocalization
     RF_DEBUG("\n----- /RosFilter::revertTo\n");
 
     return retVal;
+  }
+
+  template<typename T>
+  bool RosFilter<T>::validateFilterOutput(const nav_msgs::Odometry &message)
+  {
+    return !std::isnan(message.pose.pose.position.x) && !std::isinf(message.pose.pose.position.x) &&
+           !std::isnan(message.pose.pose.position.y) && !std::isinf(message.pose.pose.position.y) &&
+           !std::isnan(message.pose.pose.position.z) && !std::isinf(message.pose.pose.position.z) &&
+           !std::isnan(message.pose.pose.orientation.x) && !std::isinf(message.pose.pose.orientation.x) &&
+           !std::isnan(message.pose.pose.orientation.y) && !std::isinf(message.pose.pose.orientation.y) &&
+           !std::isnan(message.pose.pose.orientation.z) && !std::isinf(message.pose.pose.orientation.z) &&
+           !std::isnan(message.pose.pose.orientation.w) && !std::isinf(message.pose.pose.orientation.w) &&
+           !std::isnan(message.twist.twist.linear.x) && !std::isinf(message.twist.twist.linear.x) &&
+           !std::isnan(message.twist.twist.linear.y) && !std::isinf(message.twist.twist.linear.y) &&
+           !std::isnan(message.twist.twist.linear.z) && !std::isinf(message.twist.twist.linear.z) &&
+           !std::isnan(message.twist.twist.angular.x) && !std::isinf(message.twist.twist.angular.x) &&
+           !std::isnan(message.twist.twist.angular.y) && !std::isinf(message.twist.twist.angular.y) &&
+           !std::isnan(message.twist.twist.angular.z) && !std::isinf(message.twist.twist.angular.z);
   }
 
   template<typename T>
