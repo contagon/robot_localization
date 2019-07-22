@@ -523,17 +523,17 @@ namespace RobotLocalization
       // This means we have received an out-of-sequence message (one with an old timestamp), and we need to
       // revert both the filter state and measurement queue to the first state that preceded the time stamp
       // of our first measurement.
-      const MeasurementPtr& firstMeasurement = measurementQueue_.top();
       int restoredMeasurementCount = 0;
-      if (smoothLaggedData_ && firstMeasurement->time_ < filter_.getLastMeasurementTime())
+      while (smoothLaggedData_ && !measurementQueue_.empty() &&
+             measurementQueue_.top()->time_ < filter_.getLastMeasurementTime())
       {
-        RF_DEBUG("Received a measurement that was " << filter_.getLastMeasurementTime() - firstMeasurement->time_ <<
-                 " seconds in the past. Reverting filter state and measurement queue...");
+        RF_DEBUG("Received a measurement that was " << filter_.getLastMeasurementTime() - measurementQueue_.top()->time_
+                 << " seconds in the past. Attempting to revert filter state and measurement queue...");
 
         // Copy first measurement time and topic name so we can use them if revertTo fails, because it can change the
         // measurement queue and invalidate the first measurement reference.
-        const double firstMeasurementTime = firstMeasurement->time_;
-        const std::string firstMeasurementTopicName = firstMeasurement->topicName_;
+        const double firstMeasurementTime = measurementQueue_.top()->time_;
+        const std::string firstMeasurementTopicName = measurementQueue_.top()->topicName_;
 
         const int originalCount = static_cast<int>(measurementQueue_.size());
         if (!revertTo(firstMeasurementTime - 1e-9))
@@ -542,10 +542,14 @@ namespace RobotLocalization
           ROS_WARN_STREAM_DELAYED_THROTTLE(historyLength_, "Received old measurement for topic " <<
             firstMeasurementTopicName << ", but history interval is insufficiently sized to revert state and "
             "measurement queue.");
-          restoredMeasurementCount = 0;
+          measurementQueue_.pop();
+          continue;
         }
-
-        restoredMeasurementCount = static_cast<int>(measurementQueue_.size()) - originalCount;
+        else
+        {
+          restoredMeasurementCount = static_cast<int>(measurementQueue_.size()) - originalCount;
+          break;
+        }
       }
 
       while (!measurementQueue_.empty() && ros::ok())
@@ -3199,43 +3203,27 @@ namespace RobotLocalization
 
     // Walk back through the queue until we reach a filter state whose time stamp is less than or equal to the
     // requested time. Since every saved state after that time will be overwritten/corrected, we can pop from
-    // the queue. If the history is insufficiently short, we just take the oldest state we have.
-    FilterStatePtr lastHistoryState;
+    // the queue. If the history is insufficiently short, we do not revert.
+    if (filterStateHistory_.empty() || filterStateHistory_.front()->lastMeasurementTime_ > time)
+    {
+      RF_DEBUG("Insufficient history to revert to time " << time << "\n");
+      return false;
+    }
+
     while (!filterStateHistory_.empty() && filterStateHistory_.back()->lastMeasurementTime_ > time)
     {
-      lastHistoryState = filterStateHistory_.back();
       filterStateHistory_.pop_back();
     }
 
-    // If the state history is not empty at this point, it means that our history was large enough, and we
-    // should revert to the state at the back of the history deque.
-    bool retVal = false;
-    if (!filterStateHistory_.empty())
-    {
-      retVal = true;
-      lastHistoryState = filterStateHistory_.back();
-    }
-    else
-    {
-      RF_DEBUG("Insufficient history to revert to time " << time << "\n");
+    // filterStateHistory_ must contain at least one state at this point, so we can revert to it
 
-      if (lastHistoryState.get() != NULL)
-      {
-        RF_DEBUG("Will revert to oldest state at " << lastHistoryState->latestControlTime_ << ".\n");
-      }
-    }
+    // Reset filter to the latest state from the queue.
+    const FilterStatePtr &state = filterStateHistory_.back();;
+    filter_.setState(state->state_);
+    filter_.setEstimateErrorCovariance(state->estimateErrorCovariance_);
+    filter_.setLastMeasurementTime(state->lastMeasurementTime_);
 
-    // If we have a valid reversion state, revert
-    if (lastHistoryState.get() != NULL)
-    {
-      // Reset filter to the latest state from the queue.
-      const FilterStatePtr &state = lastHistoryState;
-      filter_.setState(state->state_);
-      filter_.setEstimateErrorCovariance(state->estimateErrorCovariance_);
-      filter_.setLastMeasurementTime(state->lastMeasurementTime_);
-
-      RF_DEBUG("Reverted to state with time " << std::setprecision(20) << state->lastMeasurementTime_ << "\n");
-    }
+    RF_DEBUG("Reverted to state with time " << std::setprecision(20) << state->lastMeasurementTime_ << "\n");
 
     // Repeat for measurements, but push every measurement onto the measurement queue as we go
     int restored_measurements = 0;
@@ -3250,7 +3238,7 @@ namespace RobotLocalization
 
     RF_DEBUG("\n----- /RosFilter::revertTo\n");
 
-    return retVal;
+    return true;
   }
 
   template<typename T>
