@@ -51,6 +51,7 @@ namespace RobotLocalization
     controlTimeout_(0.0),
     controlUpdateVector_(TWIST_SIZE, 0),
     dynamicProcessNoiseCovariance_(STATE_SIZE, STATE_SIZE),
+    lastMeasurementTime_(0.0),
     latestControlTime_(0.0),
     state_(STATE_SIZE),
     predictedState_(STATE_SIZE),
