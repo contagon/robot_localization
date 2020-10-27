@@ -37,12 +37,52 @@
 
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
+#include <Eigen/Core>
+#include <Eigen/Eigenvalues>
+
 #include <algorithm>
 #include <map>
 #include <string>
 #include <utility>
 #include <vector>
 #include <limits>
+
+/**
+ * @brief Check if a matrix is symmetric.
+ *
+ * @param[in] m - Square matrix to check symmetry on
+ * @param[in] precision - Precision used to compared the matrix m with its transpose, which is the property used to
+ *                        check for symmetry.
+ * @return True if the matrix m is symmetric; False, otherwise.
+ */
+template <typename Derived>
+bool isSymmetric(const Eigen::DenseBase<Derived>& m,
+                 const typename Eigen::DenseBase<Derived>::RealScalar precision =
+                     Eigen::NumTraits<typename Eigen::DenseBase<Derived>::Scalar>::dummy_precision())
+{
+  // We do not use `isApprox`:
+  //
+  // return m.isApprox(m.transpose(), precision);
+  //
+  // because it does not play well when `m` is close to zero.
+  //
+  // See: https://eigen.tuxfamily.org/dox/classEigen_1_1DenseBase.html#ae8443357b808cd393be1b51974213f9c
+  const auto& derived = m.derived();
+  return (derived - derived.transpose()).cwiseAbs().maxCoeff() < precision;
+}
+
+/**
+ * @brief Check if a matrix is Positive Definite (PD), i.e. all eigenvalues are `> 0.0`.
+ *
+ * @param[in] m - Square matrix to check PD-ness on.
+ * @return True if the matrix m is PD; False, otherwise.
+ */
+template <typename Derived>
+bool isPositiveDefinite(const Eigen::DenseBase<Derived>& m)
+{
+  Eigen::SelfAdjointEigenSolver<Derived> solver(m);
+  return solver.eigenvalues().minCoeff() > 0.0;
+}
 
 namespace RobotLocalization
 {
@@ -1909,25 +1949,24 @@ namespace RobotLocalization
         // Now we'll integrate any measurements we've received
         integrateMeasurements(curTime);
 
+        // Roll back to previous state if the current state is not valid
+        if (!validState())
+        {
+          ROS_ERROR_STREAM("Detected invalid filter state and/or covariance." <<
+                " This was likely due to poorly conditioned process, noise, or sensor covariances." <<
+                " Reverting to previous state.");
+
+          filter_.setState(previousState.state_);
+          filter_.setEstimateErrorCovariance(previousState.estimateErrorCovariance_);
+          // FIXME The validation check should actually be part of the filter, so we can even detect invalid
+          // measurements or state prediction
+        }
+
         // Get latest state and publish it
         nav_msgs::Odometry filteredPosition;
 
         if (getFilteredOdometryMessage(filteredPosition))
         {
-          if (!validateFilterOutput(filteredPosition))
-          {
-            ROS_ERROR_STREAM("NaNs were detected in the output state of the filter." <<
-                  " This was likely due to poorly coniditioned process, noise, or sensor covariances." <<
-                  " Reverting to previous state.");
-
-            filter_.setState(previousState.state_);
-            filter_.setEstimateErrorCovariance(previousState.estimateErrorCovariance_);
-            // FIXME we assume getFilteredOdometryMessage would be good; the validation check should actuall
-            // the filter, on the state, not on the output message, so we can even detect that per measureme
-            // or state prediction
-            getFilteredOdometryMessage(filteredPosition);
-          }
-
           worldBaseLinkTransMsg_.header.stamp = filteredPosition.header.stamp + tfTimeOffset_;
           worldBaseLinkTransMsg_.header.frame_id = filteredPosition.header.frame_id;
           worldBaseLinkTransMsg_.child_frame_id = filteredPosition.child_frame_id;
@@ -3242,22 +3281,22 @@ namespace RobotLocalization
   }
 
   template<typename T>
-  bool RosFilter<T>::validateFilterOutput(const nav_msgs::Odometry &message)
+  bool RosFilter<T>::validState()
   {
-    return !std::isnan(message.pose.pose.position.x) && !std::isinf(message.pose.pose.position.x) &&
-           !std::isnan(message.pose.pose.position.y) && !std::isinf(message.pose.pose.position.y) &&
-           !std::isnan(message.pose.pose.position.z) && !std::isinf(message.pose.pose.position.z) &&
-           !std::isnan(message.pose.pose.orientation.x) && !std::isinf(message.pose.pose.orientation.x) &&
-           !std::isnan(message.pose.pose.orientation.y) && !std::isinf(message.pose.pose.orientation.y) &&
-           !std::isnan(message.pose.pose.orientation.z) && !std::isinf(message.pose.pose.orientation.z) &&
-           !std::isnan(message.pose.pose.orientation.w) && !std::isinf(message.pose.pose.orientation.w) &&
-           !std::isnan(message.twist.twist.linear.x) && !std::isinf(message.twist.twist.linear.x) &&
-           !std::isnan(message.twist.twist.linear.y) && !std::isinf(message.twist.twist.linear.y) &&
-           !std::isnan(message.twist.twist.linear.z) && !std::isinf(message.twist.twist.linear.z) &&
-           !std::isnan(message.twist.twist.angular.x) && !std::isinf(message.twist.twist.angular.x) &&
-           !std::isnan(message.twist.twist.angular.y) && !std::isinf(message.twist.twist.angular.y) &&
-           !std::isnan(message.twist.twist.angular.z) && !std::isinf(message.twist.twist.angular.z);
-  }
+    // Skip if the filter is not initialized yet
+    if (!filter_.getInitializedStatus())
+    {
+      return true;
+    }
+
+    // Grab our current state and covariance estimates
+    const Eigen::VectorXd &state = filter_.getState();
+    const Eigen::MatrixXd &estimateErrorCovariance = filter_.getEstimateErrorCovariance();
+
+    // Validate the state is finite and the covariance is symmetric and Positive Definite
+    return state.array().isFinite().all() &&
+           isSymmetric(estimateErrorCovariance) && isPositiveDefinite(estimateErrorCovariance);
+  };
 
   template<typename T>
   void RosFilter<T>::clearExpiredHistory(const double cutOffTime)

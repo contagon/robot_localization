@@ -269,11 +269,13 @@ template<class T> class RosFilter
                        const CallbackData &callbackData,
                        const std::string &targetFrame);
 
-    //! @brief Validates filter outputs for NaNs and Infinite values
-    //! @param[out] message - The standard ROS odometry message to be validated
-    //! @return true if the filter output is valid, false otherwise
+    //! @brief Check if the filter state and covariance are valid.
     //!
-    bool validateFilterOutput(const nav_msgs::Odometry &message);
+    //! That is, the state is finite and the covariance is symmetric and Positive Definite.
+    //
+    //! @return true if the filter state and covariance are valid, false otherwise.
+    //!
+    bool validState();
 
   protected:
     //! @brief Finds the latest filter state before the given timestamp and makes it the current state again.
