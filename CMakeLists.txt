@@ -154,6 +154,7 @@ install(TARGETS
   ros_filter
   ros_filter_utilities
   ros_robot_localization_listener
+  robot_localization_estimator
   ukf
   ukf_localization_node
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
