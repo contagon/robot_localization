@@ -1912,6 +1912,8 @@ namespace RobotLocalization
         // Get latest state and publish it
         nav_msgs::Odometry filteredPosition;
 
+        bool corrected_data = false;
+
         if (getFilteredOdometryMessage(filteredPosition))
         {
           if (!validateFilterOutput(filteredPosition))
@@ -1928,6 +1930,13 @@ namespace RobotLocalization
             getFilteredOdometryMessage(filteredPosition);
           }
 
+          // If we're trying to publish with the same time stamp, it means that we had a measurement get inserted into the
+          // filter history, and our state estimate was updated after it was already published. As of ROS Noetic, TF2 will
+          // issue warnings whenever this occurs
+          // Just for safety, we also check for the condition where the last published stamp is *later* than this stamp.
+          // This should never happen, but we should handle the case anyway.
+          corrected_data = (lastPublishedStamp_ >= filteredPosition.header.stamp);
+
           worldBaseLinkTransMsg_.header.stamp = filteredPosition.header.stamp + tfTimeOffset_;
           worldBaseLinkTransMsg_.header.frame_id = filteredPosition.header.frame_id;
           worldBaseLinkTransMsg_.child_frame_id = filteredPosition.child_frame_id;
@@ -1939,7 +1948,7 @@ namespace RobotLocalization
 
           // If the worldFrameId_ is the odomFrameId_ frame, then we can just send the transform. If the
           // worldFrameId_ is the mapFrameId_ frame, we'll have some work to do.
-          if (publishTransform_)
+          if (publishTransform_ && !corrected_data)
           {
             if (filteredPosition.header.frame_id == odomFrameId_)
             {
@@ -2024,7 +2033,13 @@ namespace RobotLocalization
           }
 
           // Fire off the position and the transform
-          positionPub.publish(filteredPosition);
+          if (!corrected_data)
+          {
+            positionPub.publish(filteredPosition);
+          }
+
+          // Retain the last published stamp so we can detect repeated transforms in future cycles
+          lastPublishedStamp_ = filteredPosition.header.stamp;
 
           if (printDiagnostics_)
           {
@@ -2062,7 +2077,7 @@ namespace RobotLocalization
 
         // Publish the acceleration if desired and filter is initialized
         geometry_msgs::AccelWithCovarianceStamped filteredAcceleration;
-        if (publishAcceleration_ && getFilteredAccelMessage(filteredAcceleration))
+        if (publishAcceleration_ && getFilteredAccelMessage(filteredAcceleration) && !corrected_data)
         {
           accelPub.publish(filteredAcceleration);
         }

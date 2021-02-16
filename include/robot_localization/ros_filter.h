@@ -648,6 +648,10 @@ template<class T> class RosFilter
     //!
     geometry_msgs::TransformStamped worldBaseLinkTransMsg_;
 
+    //! @brief The time of the most recent published state
+    //!
+    ros::Time lastPublishedStamp_;
+
     //! @brief tf frame name that is the parent frame of the transform that this node will calculate and broadcast.
     //!
     std::string worldFrameId_;
