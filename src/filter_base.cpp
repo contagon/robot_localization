@@ -218,18 +218,20 @@ namespace RobotLocalization
                "Measurement time is " << std::setprecision(20) << measurement.time_ <<
                ", last measurement time is " << lastMeasurementTime_ << ", delta is " << delta << "\n");
 
-      // Only want to carry out a prediction if it's
-      // forward in time. Otherwise, just correct.
-      if (delta > 0)
-      {
-        validateDelta(delta);
-        predict(measurement.time_, delta);
+      if(!measurement.measurement_.isNan()){
+        // Only want to carry out a prediction if it's
+        // forward in time. Otherwise, just correct.
+        if (delta > 0)
+        {
+          validateDelta(delta);
+          predict(measurement.time_, delta);
 
-        // Return this to the user
-        predictedState_ = state_;
+          // Return this to the user
+          predictedState_ = state_;
+        }
+
+        correct(measurement);
       }
-
-      correct(measurement);
     }
     else
     {
